@@ -47,6 +47,7 @@ Q_LOGGING_CATEGORY(librepods, "librepods")
 class AirPodsTrayApp : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool airpodsConnected READ areAirpodsConnected NOTIFY airPodsStatusChanged)
+    Q_PROPERTY(bool controlChannelAvailable READ isControlChannelAvailable NOTIFY controlChannelAvailableChanged)
     Q_PROPERTY(int earDetectionBehavior READ earDetectionBehavior WRITE setEarDetectionBehavior NOTIFY earDetectionBehaviorChanged)
     Q_PROPERTY(bool crossDeviceEnabled READ crossDeviceEnabled WRITE setCrossDeviceEnabled NOTIFY crossDeviceEnabledChanged)
     Q_PROPERTY(AutoStartManager *autoStartManager READ autoStartManager CONSTANT)
@@ -89,6 +90,9 @@ public:
         connect(m_bleManager, &BleManager::deviceFound, this, &AirPodsTrayApp::bleDeviceFound);
         connect(m_deviceInfo->getBattery(), &Battery::primaryChanged, this, &AirPodsTrayApp::primaryChanged);
         connect(m_deviceInfo->getEarDetection(), &EarDetection::statusChanged, this, &AirPodsTrayApp::checkCaseRemoval);
+        connect(m_deviceInfo->getEarDetection(), &EarDetection::statusChanged, this, [this]() {
+            mediaController->handleEarDetection(m_deviceInfo->getEarDetection());
+        });
         
         if (m_systemSleepMonitor->initialize())
         {
@@ -113,9 +117,21 @@ public:
         {
             const QList<QBluetoothAddress> winPods = WinL2capSocket::connectedAirPods();
             for (const QBluetoothAddress &address : winPods) {
-                LOG_INFO("Found connected AirPods via AAP driver: " << address.toString());
-                QBluetoothDeviceInfo device(address, "AirPods", 0);
+                LOG_INFO("Found connected AirPods via AAP driver/BTHENUM: " << address.toString());
+                m_isDeviceConnected = true;
+                m_deviceInfo->setBluetoothAddress(address.toString());
+                QString friendlyName = WinL2capSocket::deviceFriendlyName(address);
+                m_deviceInfo->setDeviceName(friendlyName.isEmpty() ? QStringLiteral("AirPods") : friendlyName);
+                mediaController->setConnectedDeviceMacAddress(address.toString().replace(":", "_"));
+                QBluetoothDeviceInfo device(address, m_deviceInfo->deviceName(), 0);
                 connectToDevice(device);
+                emit airPodsStatusChanged();
+
+                QTimer::singleShot(2000, this, [this]() {
+                    mediaController->activateA2dpProfile();
+                    LOG_INFO("A2DP profile activation attempted for Windows AirPods found on startup");
+                });
+                break;
             }
         }
 
@@ -142,7 +158,7 @@ public:
                     mediaController->activateA2dpProfile();
                     LOG_INFO("A2DP profile activation attempted for AirPods found on startup");
                 });
-                return;
+                break;
             }
         }
 
@@ -157,7 +173,8 @@ public:
         delete phoneSocket;
     }
 
-    bool areAirpodsConnected() const { return socket && socket->isOpen() && socket->state() == AapSocket::SocketState::ConnectedState; }
+    bool areAirpodsConnected() const { return m_isDeviceConnected || isControlChannelAvailable(); }
+    bool isControlChannelAvailable() const { return socket && socket->isOpen() && socket->state() == AapSocket::SocketState::ConnectedState; }
     int earDetectionBehavior() const { return mediaController->getEarDetectionBehavior(); }
     bool crossDeviceEnabled() const { return CrossDevice.isEnabled; }
     AutoStartManager *autoStartManager() const { return m_autoStartManager; }
@@ -491,6 +508,7 @@ private slots:
     void onDeviceDisconnected(const QBluetoothAddress &address)
     {
         LOG_INFO("Device disconnected: " << address.toString());
+        m_isDeviceConnected = false;
         if (socket)
         {
             LOG_WARN("Socket is still open, closing it");
@@ -506,6 +524,7 @@ private slots:
         // Clear the device name and model
         m_deviceInfo->reset();
         m_bleManager->startScan();
+        emit controlChannelAvailableChanged();
         emit airPodsStatusChanged();
 
         // Show system notification
@@ -528,15 +547,44 @@ private slots:
         const QList<QBluetoothAddress> pods = WinL2capSocket::connectedAirPods();
         const bool present = !pods.isEmpty();
 
-        if (present && !areAirpodsConnected())
+        if (present)
         {
-            LOG_INFO("Poller: AirPods present but not connected, connecting to " << pods.first().toString());
-            connectToDevice(QBluetoothDeviceInfo(pods.first(), "AirPods", 0));
+            const QBluetoothAddress &addr = pods.first();
+            bool newlyConnected = !m_isDeviceConnected;
+
+            m_isDeviceConnected = true;
+
+            if (m_deviceInfo->bluetoothAddress() != addr.toString())
+            {
+                m_deviceInfo->setBluetoothAddress(addr.toString());
+                mediaController->setConnectedDeviceMacAddress(addr.toString().replace(":", "_"));
+            }
+
+            QString friendlyName = WinL2capSocket::deviceFriendlyName(addr);
+            if (!friendlyName.isEmpty() && m_deviceInfo->deviceName() != friendlyName)
+            {
+                m_deviceInfo->setDeviceName(friendlyName);
+            }
+            else if (m_deviceInfo->deviceName().isEmpty())
+            {
+                m_deviceInfo->setDeviceName(QStringLiteral("AirPods"));
+            }
+
+            if (newlyConnected)
+            {
+                LOG_INFO("Poller: AirPods connected: " << m_deviceInfo->deviceName() << " (" << addr.toString() << ")");
+                emit airPodsStatusChanged();
+                if (!isControlChannelAvailable())
+                {
+                    connectToDevice(QBluetoothDeviceInfo(addr, m_deviceInfo->deviceName(), 0));
+                }
+            }
         }
-        else if (!present && socket && socket->isOpen())
+        else if (!present && (m_isDeviceConnected || (socket && socket->isOpen())))
         {
             LOG_INFO("Poller: AirPods no longer present, handling disconnect");
-            onDeviceDisconnected(socket->peerAddress());
+            m_isDeviceConnected = false;
+            onDeviceDisconnected(socket ? socket->peerAddress() : QBluetoothAddress(m_deviceInfo->bluetoothAddress()));
         }
     }
 
@@ -622,11 +670,14 @@ private slots:
         // Connection handler
         auto handleConnection = [this, localSocket]()
         {
+            m_retryCount = 0;
             connect(localSocket, &AapSocket::readyRead, this, [this, localSocket]()
                     {
             QByteArray data = localSocket->readAll();
             QMetaObject::invokeMethod(this, "parseData", Qt::QueuedConnection, Q_ARG(QByteArray, data));
             QMetaObject::invokeMethod(this, "relayPacketToPhone", Qt::QueuedConnection, Q_ARG(QByteArray, data)); });
+            emit controlChannelAvailableChanged();
+            emit airPodsStatusChanged();
             sendHandshake();
         };
 
@@ -634,19 +685,19 @@ private slots:
         auto handleError = [this, device, localSocket](AapSocket::SocketError error)
         {
             LOG_ERROR("Socket error: " << error << ", " << localSocket->errorString());
+            emit controlChannelAvailableChanged();
 
-            static int retryCount = 0;
-            if (retryCount < m_retryAttempts)
+            if (m_retryCount < m_retryAttempts)
             {
-                retryCount++;
-                LOG_INFO("Retrying connection (attempt " << retryCount << ")");
+                m_retryCount++;
+                LOG_INFO("Retrying connection (attempt " << m_retryCount << ")");
                 QTimer::singleShot(1500, this, [this, device]()
                                    { connectToDevice(device); });
             }
             else
             {
-                LOG_ERROR("Failed to connect after 3 attempts");
-                retryCount = 0;
+                LOG_ERROR("Failed to connect after " << m_retryAttempts << " attempts");
+                m_retryCount = 0;
             }
         };
 
@@ -915,6 +966,7 @@ private slots:
 
         if (irkValid) {
             LOG_DEBUG("IRK matched device address: " << device.address);
+            m_isDeviceConnected = true;
             m_deviceInfo->setModel(device.modelName);
             auto decrypted = BLEUtils::decryptLastBytes(device.encryptedPayload, m_deviceInfo->magicAccEncKey());
             m_deviceInfo->getBattery()->parseEncryptedPacket(decrypted, device.primaryLeft, device.isThisPodInTheCase, isModelHeadset(m_deviceInfo->model()));
@@ -922,9 +974,10 @@ private slots:
             m_deviceInfo->updateBatteryStatus();
             trayManager->updateBatteryStatus(m_deviceInfo->batteryStatus());
             emit airPodsStatusChanged();
-        } else if (!hasIrk) {
+        } else if (!hasIrk || (m_isDeviceConnected && device.modelName != AirPodsModel::Unknown)) {
             // Unencrypted Proximity Pairing Fallback (Milestone 1)
             // Immediately populate model, battery and in-ear status without requiring encryption keys
+            m_isDeviceConnected = true;
             if (device.modelName != AirPodsModel::Unknown) {
                 m_deviceInfo->setModel(device.modelName);
             }
@@ -1024,7 +1077,7 @@ public:
         connectToPhone();
 
         m_deviceInfo->loadFromSettings(*m_settings);
-        if (!areAirpodsConnected()) {
+        if (!isControlChannelAvailable()) {
             m_bleManager->startScan();
         }
     }
@@ -1062,6 +1115,7 @@ signals:
     void modelChanged();
     void primaryChanged();
     void airPodsStatusChanged();
+    void controlChannelAvailableChanged();
     void airPodsTakenOutOfCase();
     void earDetectionBehaviorChanged(int behavior);
     void crossDeviceEnabledChanged(bool enabled);
@@ -1072,6 +1126,7 @@ signals:
     void hearingAidEnabledChanged(bool enabled);
 
 private:
+    bool m_isDeviceConnected = false;
     AapSocket *socket = nullptr;
     QBluetoothSocket *phoneSocket = nullptr;
     QByteArray lastBatteryStatus;
@@ -1081,6 +1136,7 @@ private:
     QSettings *m_settings;
     AutoStartManager *m_autoStartManager;
     int m_retryAttempts = 3;
+    int m_retryCount = 0;
     int m_prevInCaseCount = 0;
     bool m_hideOnStart = false;
     DeviceInfo *m_deviceInfo;

@@ -89,6 +89,10 @@ BleManager::BleManager(QObject *parent) : QObject(parent)
 
     connect(discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
             this, &BleManager::onDeviceDiscovered);
+    connect(discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceUpdated,
+            this, [this](const QBluetoothDeviceInfo &info, QBluetoothDeviceInfo::Fields) {
+                onDeviceDiscovered(info);
+            });
     connect(discoveryAgent, &QBluetoothDeviceDiscoveryAgent::finished,
             this, &BleManager::onScanFinished);
     connect(discoveryAgent, &QBluetoothDeviceDiscoveryAgent::errorOccurred,

@@ -111,9 +111,19 @@ void MediaController::followMediaChanges() {
 }
 
 bool MediaController::isActiveOutputDeviceAirPods() {
+#ifdef Q_OS_WIN
+  QString friendlyName = getDefaultSinkFriendlyName();
+  LOG_DEBUG("Default sink friendly name: " << friendlyName);
+  if (!friendlyName.isEmpty() && friendlyName.contains("AirPods", Qt::CaseInsensitive)) {
+    return true;
+  }
+#endif
   QString defaultSink = getDefaultSink();
   LOG_DEBUG("Default sink: " << defaultSink);
-  return defaultSink.contains(connectedDeviceMacAddress);
+  if (!m_deviceOutputName.isEmpty() && defaultSink.compare(m_deviceOutputName, Qt::CaseInsensitive) == 0) {
+    return true;
+  }
+  return !connectedDeviceMacAddress.isEmpty() && defaultSink.contains(connectedDeviceMacAddress);
 }
 
 void MediaController::handleConversationalAwareness(const QByteArray &data) {
@@ -444,6 +454,17 @@ QString MediaController::getDefaultSink()
   return m_pulseAudio ? m_pulseAudio->getDefaultSink() : QString();
 #elif defined(Q_OS_WIN)
   return m_windowsAudio ? m_windowsAudio->getDefaultSink() : QString();
+#else
+  return QString();
+#endif
+}
+
+QString MediaController::getDefaultSinkFriendlyName()
+{
+#ifdef Q_OS_LINUX
+  return QString();
+#elif defined(Q_OS_WIN)
+  return m_windowsAudio ? m_windowsAudio->getDefaultSinkFriendlyName() : QString();
 #else
   return QString();
 #endif

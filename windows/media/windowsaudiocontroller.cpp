@@ -96,6 +96,30 @@ QString WindowsAudioController::getDefaultSink()
 #endif
 }
 
+QString WindowsAudioController::getDefaultSinkFriendlyName()
+{
+#ifdef Q_OS_WIN
+    if (!m_initialized || !m_deviceEnumerator)
+        return QString();
+
+    IMMDevice *defaultDevice = nullptr;
+    HRESULT hr = m_deviceEnumerator->GetDefaultAudioEndpoint(
+        eRender, eConsole, &defaultDevice);
+
+    if (FAILED(hr))
+    {
+        LOG_ERROR("Failed to get default audio endpoint for friendly name");
+        return QString();
+    }
+
+    QString name = getDeviceFriendlyName(defaultDevice);
+    defaultDevice->Release();
+    return name;
+#else
+    return QString();
+#endif
+}
+
 int WindowsAudioController::getSinkVolume(const QString &sinkName)
 {
 #ifdef Q_OS_WIN
@@ -210,7 +234,7 @@ QString WindowsAudioController::getCardNameForDevice(const QString &macAddress)
 
     IMMDeviceCollection *deviceCollection = nullptr;
     HRESULT hr = m_deviceEnumerator->EnumAudioEndpoints(
-        eRender, DEVICE_STATE_ACTIVE, &deviceCollection);
+        eRender, DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED, &deviceCollection);
     
     if (FAILED(hr))
     {
@@ -221,7 +245,7 @@ QString WindowsAudioController::getCardNameForDevice(const QString &macAddress)
     UINT count = 0;
     deviceCollection->GetCount(&count);
 
-    QString result;
+    QString bestMatchId;
     for (UINT i = 0; i < count; i++)
     {
         IMMDevice *device = nullptr;
@@ -238,10 +262,17 @@ QString WindowsAudioController::getCardNameForDevice(const QString &macAddress)
             LPWSTR deviceId = nullptr;
             if (SUCCEEDED(device->GetId(&deviceId)))
             {
-                result = QString::fromWCharArray(deviceId);
+                QString curId = QString::fromWCharArray(deviceId);
                 CoTaskMemFree(deviceId);
-                device->Release();
-                break;
+
+                bool isHandsFree = friendlyName.contains("Hands-Free", Qt::CaseInsensitive);
+                if (!isHandsFree) {
+                    bestMatchId = curId;
+                    device->Release();
+                    break;
+                } else if (bestMatchId.isEmpty()) {
+                    bestMatchId = curId;
+                }
             }
         }
         
@@ -249,7 +280,7 @@ QString WindowsAudioController::getCardNameForDevice(const QString &macAddress)
     }
 
     deviceCollection->Release();
-    return result;
+    return bestMatchId;
 #else
     Q_UNUSED(macAddress);
     return QString();

@@ -232,7 +232,7 @@ public:
             if (rightLevel >= 0) {
                 states[Component::Right] = {static_cast<quint8>(rightLevel), isRightCharging ? BatteryStatus::Charging : BatteryStatus::Discharging};
             }
-            if (caseLevel >= 0 && podInCase) {
+            if (caseLevel >= 0) {
                 states[Component::Case] = {static_cast<quint8>(caseLevel), isCaseCharging ? BatteryStatus::Charging : BatteryStatus::Discharging};
             }
             primaryPod = isLeftPrimary ? Component::Left : Component::Right;

@@ -33,9 +33,10 @@ public:
     explicit WinL2capSocket(QBluetoothServiceInfo::Protocol protocol, QObject *parent = nullptr);
     ~WinL2capSocket() override;
 
-    // Enumerate AirPods currently reachable via the AAP profile driver
+    // Enumerate AirPods currently reachable via native BTHENUM or AAP profile driver
     // (one device-interface instance exists per connected AirPods).
     static QList<QBluetoothAddress> connectedAirPods();
+    static QString deviceFriendlyName(const QBluetoothAddress &address);
 
     // Resolve the driver's device interface for `address`, open the channel.
     void connectToService(const QBluetoothAddress &address, const QBluetoothUuid &uuid);

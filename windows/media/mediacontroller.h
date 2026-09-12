@@ -65,6 +65,7 @@ private:
   QString getAudioDeviceName();
   QStringList getPlayingMediaPlayers();
   QString getDefaultSink();
+  QString getDefaultSinkFriendlyName();
   int getSinkVolume(const QString &sinkName);
   bool setSinkVolume(const QString &sinkName, int volumePercent);
   QString getCardNameForDevice(const QString &macAddress);

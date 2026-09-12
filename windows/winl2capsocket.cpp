@@ -67,32 +67,98 @@ static QString resolveInterfacePath(const QBluetoothAddress &address)
 QList<QBluetoothAddress> WinL2capSocket::connectedAirPods()
 {
     QList<QBluetoothAddress> result;
-    HDEVINFO di = SetupDiGetClassDevs(&kAapInterfaceGuid, nullptr, nullptr,
-                                      DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    if (di == INVALID_HANDLE_VALUE)
-        return result;
 
-    SP_DEVICE_INTERFACE_DATA ifd; ifd.cbSize = sizeof(ifd);
-    for (DWORD i = 0; SetupDiEnumDeviceInterfaces(di, nullptr, &kAapInterfaceGuid, i, &ifd); ++i) {
-        DWORD need = 0;
-        SetupDiGetDeviceInterfaceDetail(di, &ifd, nullptr, 0, &need, nullptr);
-        if (need == 0) continue;
-        auto *detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA *>(malloc(need));
-        detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-        if (SetupDiGetDeviceInterfaceDetail(di, &ifd, detail, need, nullptr, nullptr)) {
-            // Path embeds the address, e.g. ...&0&70aed5c8ec3d_c00000000#{...}
-            QString path = QString::fromWCharArray(detail->DevicePath);
-            QRegularExpression re("&([0-9a-fA-F]{12})_c", QRegularExpression::CaseInsensitiveOption);
-            auto m = re.match(path);
-            if (m.hasMatch()) {
-                QString hex = m.captured(1).toUpper();
-                QString mac = QStringLiteral("%1:%2:%3:%4:%5:%6")
-                    .arg(hex.mid(0,2), hex.mid(2,2), hex.mid(4,2), hex.mid(6,2), hex.mid(8,2), hex.mid(10,2));
-                QBluetoothAddress addr(mac);
-                if (!result.contains(addr)) result.append(addr);
+    // 1. Enumerate Windows native BTHENUM PnP devices matching AAP Service UUID
+    //    {74EC2172-0BAD-4D01-8F77-997B2BE0722A}
+    HDEVINFO di = SetupDiGetClassDevsA(NULL, "BTHENUM", NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    if (di != INVALID_HANDLE_VALUE) {
+        SP_DEVINFO_DATA devInfoData;
+        devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+        static const QRegularExpression re(QStringLiteral("[&_]([0-9a-fA-F]{12})(_|$)"), QRegularExpression::CaseInsensitiveOption);
+        for (DWORD i = 0; SetupDiEnumDeviceInfo(di, i, &devInfoData); ++i) {
+            char instanceId[512] = {0};
+            if (SetupDiGetDeviceInstanceIdA(di, &devInfoData, instanceId, sizeof(instanceId), nullptr)) {
+                QString idStr = QString::fromLatin1(instanceId);
+                if (idStr.contains("{74EC2172-0BAD-4D01-8F77-997B2BE0722A}", Qt::CaseInsensitive)) {
+                    auto m = re.match(idStr);
+                    if (m.hasMatch()) {
+                        QString hex = m.captured(1).toUpper();
+                        QString mac = QStringLiteral("%1:%2:%3:%4:%5:%6")
+                            .arg(hex.mid(0,2), hex.mid(2,2), hex.mid(4,2), hex.mid(6,2), hex.mid(8,2), hex.mid(10,2));
+                        QBluetoothAddress addr(mac);
+                        if (!result.contains(addr)) result.append(addr);
+                    }
+                }
             }
         }
-        free(detail);
+        SetupDiDestroyDeviceInfoList(di);
+    }
+
+    if (!result.isEmpty())
+        return result;
+
+    // 2. Fallback to kAapInterfaceGuid (for custom KMDF profile driver)
+    di = SetupDiGetClassDevs(&kAapInterfaceGuid, nullptr, nullptr,
+                             DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (di != INVALID_HANDLE_VALUE) {
+        SP_DEVICE_INTERFACE_DATA ifd; ifd.cbSize = sizeof(ifd);
+        static const QRegularExpression re(QStringLiteral("[&_]([0-9a-fA-F]{12})(_|$)"), QRegularExpression::CaseInsensitiveOption);
+        for (DWORD i = 0; SetupDiEnumDeviceInterfaces(di, nullptr, &kAapInterfaceGuid, i, &ifd); ++i) {
+            DWORD need = 0;
+            SetupDiGetDeviceInterfaceDetail(di, &ifd, nullptr, 0, &need, nullptr);
+            if (need == 0) continue;
+            auto *detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA *>(malloc(need));
+            detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+            if (SetupDiGetDeviceInterfaceDetail(di, &ifd, detail, need, nullptr, nullptr)) {
+                // Path embeds the address, e.g. ...&0&70aed5c8ec3d_c00000000#{...}
+                QString path = QString::fromWCharArray(detail->DevicePath);
+                auto m = re.match(path);
+                if (m.hasMatch()) {
+                    QString hex = m.captured(1).toUpper();
+                    QString mac = QStringLiteral("%1:%2:%3:%4:%5:%6")
+                        .arg(hex.mid(0,2), hex.mid(2,2), hex.mid(4,2), hex.mid(6,2), hex.mid(8,2), hex.mid(10,2));
+                    QBluetoothAddress addr(mac);
+                    if (!result.contains(addr)) result.append(addr);
+                }
+            }
+            free(detail);
+        }
+        SetupDiDestroyDeviceInfoList(di);
+    }
+
+    return result;
+}
+
+QString WinL2capSocket::deviceFriendlyName(const QBluetoothAddress &address)
+{
+    QString needle = "DEV_" + address.toString().remove(':').toUpper();
+    HDEVINFO di = SetupDiGetClassDevsA(NULL, "BTHENUM", NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    if (di == INVALID_HANDLE_VALUE)
+        return QString();
+
+    QString result;
+    SP_DEVINFO_DATA devInfoData;
+    devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(di, i, &devInfoData); ++i) {
+        char instanceId[512] = {0};
+        if (SetupDiGetDeviceInstanceIdA(di, &devInfoData, instanceId, sizeof(instanceId), nullptr)) {
+            QString idStr = QString::fromLatin1(instanceId);
+            if (idStr.contains(needle, Qt::CaseInsensitive)) {
+                WCHAR friendlyName[256] = {0};
+                if (!SetupDiGetDeviceRegistryPropertyW(di, &devInfoData, SPDRP_FRIENDLYNAME,
+                                                      nullptr, reinterpret_cast<PBYTE>(friendlyName),
+                                                      sizeof(friendlyName), nullptr) || friendlyName[0] == 0) {
+                    SetupDiGetDeviceRegistryPropertyW(di, &devInfoData, SPDRP_DEVICEDESC,
+                                                      nullptr, reinterpret_cast<PBYTE>(friendlyName),
+                                                      sizeof(friendlyName), nullptr);
+                }
+                if (friendlyName[0] != 0) {
+                    result = QString::fromWCharArray(friendlyName);
+                    if (!result.isEmpty())
+                        break;
+                }
+            }
+        }
     }
     SetupDiDestroyDeviceInfoList(di);
     return result;
