@@ -1,0 +1,57 @@
+name: Build LibrePods Windows
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtconnectivity qtmultimedia'
+
+      - name: Set up Ninja
+        uses: ashutoshvarma/setup-ninja@master
+        with:
+          version: 1.11.1
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake
+        run: |
+          cmake -B windows/build -S windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
+
+      - name: Build
+        run: |
+          cmake --build windows/build --config Release
+
+      - name: Deploy Qt Dependencies
+        run: |
+          & "$env:Qt6_DIR\bin\windeployqt.exe" --qmldir windows windows/build/librepods-windows.exe
+
+      - name: Upload Windows Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: librepods-windows-x64
+          path: |
+            windows/build/librepods-windows.exe
+            windows/build/*.dll
+            windows/build/plugins
+            windows/build/qml

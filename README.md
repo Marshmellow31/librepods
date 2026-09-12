@@ -33,30 +33,31 @@ LibrePods allows you to use AirPods features that are exclusive to Apple devices
 
 # Feature availability
 
-| Feature                                                     | Linux | Android |
-| ----------------------------------------------------------- | ----- | ------- |
-| Changing Listening Mode                                     | ✅     | ✅       |
-| Ear detection                                               | ✅     | ✅       |
-| Battery status                                              | ✅     | ✅       |
-| Renaming AirPods <details><summary>Note for Android</summary>On Android, you need to re-pair your AirPods after renaming them because Android might not use the latest name.</details>                                            | ✅     | ✅       |
-| Loud Sound Reduction                                        | 🔴     | ⚪       |
-| Head Gestures                                               | ⛔     | ✅       |
-| Conversational Awareness                                    | ✅     | ✅       |
-| Automatically connect to AirPods                            | ✅     | ✅       |
-| Hearing Aid                                                 | 🔴     | ⚪       |
-| Transparency Mode customization                             | 🔴     | ⚪       |
-| Multi-device connectivity (Bluetooth Multipoint; 2 devices only) | ⚪     | ⚪       |
-| <details><summary>Other accessibility configs (click to expand)</summary><ul><li>Press speed</li><li>Press and Hold duration</li><li>Noise Cancellation with single AirPod</li><li>Volume control on swipe</li><li>Volume swipe speed</li></ul></details>       | 🔴     | ✅       |
-| <details><summary>Other general configs</summary><ul><li>Press and Hold to cycle between listening modes/invoke digital assistant (invoking digital assistant needs a recent firmware)</li><li>Configure call controls</li><li>Personalized volume</li><li>Loud Sound Reduction (needs <a href="#vendorid-spoofing">VendorID spoofing</a>)</li><li>Microphone side</li><li>Pause media when falling asleep (needs a recent firmware)</li><li>Enable <code>Off listening mode</code> to switch to <code>Off</code></li></ul></details>                   | 🔴     | ✅       |
-| [Head-tracked Spatial Audio](#spatial-audio)                | ❓     | ❓       |
-| [Heart Rate Monitoring](#heart-rate-monitoring)             | ⛔     | 🔴       |
-| [Find My](#find-my)                                         | ❓     | ❓       |
-| [High quality two-way audio](#high-quality-two-way-audio)   | 🔴     | 🔴       |
+| Feature                                                     | Linux | Android | Windows |
+| ----------------------------------------------------------- | ----- | ------- | ------- |
+| Changing Listening Mode                                     | ✅     | ✅       | 🚧 <details><summary>Driver Required</summary>Requires L2CAP kernel bridge driver due to Windows Bluetooth stack limitations.</details> |
+| Ear detection                                               | ✅     | ✅       | ✅ (BLE Broadcast + Core Audio WASAPI) |
+| Battery status                                              | ✅     | ✅       | ✅ (Zero-config unencrypted BLE + IRK decrypt) |
+| Renaming AirPods <details><summary>Note for Android</summary>On Android, you need to re-pair your AirPods after renaming them because Android might not use the latest name.</details>                                            | ✅     | ✅       | 🔴       |
+| Loud Sound Reduction                                        | 🔴     | ⚪       | 🔴       |
+| Head Gestures                                               | ⛔     | ✅       | 🔴       |
+| Conversational Awareness                                    | ✅     | ✅       | 🚧 (Requires L2CAP bridge driver) |
+| Automatically connect to AirPods                            | ✅     | ✅       | ✅       |
+| Hearing Aid                                                 | 🔴     | ⚪       | 🔴       |
+| Transparency Mode customization                             | 🔴     | ⚪       | 🚧 (Requires L2CAP bridge driver) |
+| Multi-device connectivity (Bluetooth Multipoint; 2 devices only) | ⚪     | ⚪       | ⚪       |
+| <details><summary>Other accessibility configs (click to expand)</summary><ul><li>Press speed</li><li>Press and Hold duration</li><li>Noise Cancellation with single AirPod</li><li>Volume control on swipe</li><li>Volume swipe speed</li></ul></details>       | 🔴     | ✅       | 🔴       |
+| <details><summary>Other general configs</summary><ul><li>Press and Hold to cycle between listening modes/invoke digital assistant (invoking digital assistant needs a recent firmware)</li><li>Configure call controls</li><li>Personalized volume</li><li>Loud Sound Reduction (needs <a href="#vendorid-spoofing">VendorID spoofing</a>)</li><li>Microphone side</li><li>Pause media when falling asleep (needs a recent firmware)</li><li>Enable <code>Off listening mode</code> to switch to <code>Off</code></li></ul></details>                   | 🔴     | ✅       | 🔴       |
+| [Head-tracked Spatial Audio](#spatial-audio)                | ❓     | ❓       | ❓       |
+| [Heart Rate Monitoring](#heart-rate-monitoring)             | ⛔     | 🔴       | ⛔       |
+| [Find My](#find-my)                                         | ❓     | ❓       | ❓       |
+| [High quality two-way audio](#high-quality-two-way-audio)   | 🔴     | 🔴       | 🔴       |
 
 | Symbol | Meaning                                                             |
 | ------ | ------------------------------------------------------------------- |
 | ✅     | Implemented and works well                                          |
 | ⚪     | Needs [VendorID spoofing](#vendorid-spoofing); use at your own risk |
+| 🚧     | In development / requires L2CAP bridge driver on Windows            |
 | 🔴     | Not implemented yet; planned                                        |
 | ⛔     | Will not be implemented                                             |
 | ❓     | Unknown                                                             |
@@ -88,6 +89,7 @@ Since this needs deeper integration with audio on Android, it will most likely n
 
 - [**Android**](/android/README.md)
 - [**Linux**](/linux/README.md)
+- [**Windows**](/windows/BUILD.md)
 
 # VendorID Spoofing
 
