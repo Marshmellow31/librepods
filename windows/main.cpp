@@ -1044,6 +1044,11 @@ public:
             return;
         }
         QObject *rootObject = parent->rootObjects().first();
+        if (auto *window = qobject_cast<QQuickWindow *>(rootObject)) {
+            window->show();
+            window->raise();
+            window->requestActivate();
+        }
         QMetaObject::invokeMethod(rootObject, "reopen", Q_ARG(QVariant, pageToLoad));
     }
 
@@ -1210,6 +1215,16 @@ int main(int argc, char *argv[]) {
     }
     LOG_INFO("Main QML module loaded successfully");
 
+    // Explicitly show and bring main window to foreground if not hideOnStart
+    if (!hideOnStart) {
+        QObject *rootObj = engine.rootObjects().first();
+        if (auto *window = qobject_cast<QQuickWindow *>(rootObj)) {
+            window->show();
+            window->raise();
+            window->requestActivate();
+        }
+    }
+
     QLocalServer server;
     QLocalServer::removeServer("app_server");
 
@@ -1242,12 +1257,6 @@ int main(int argc, char *argv[]) {
         QObject::connect(socket, &QLocalSocket::errorOccurred, [socket]() {
             LOG_ERROR("Failed to connect to the duplicate app instance");
             LOG_DEBUG("Connection error: " << socket->errorString());
-        });
-
-        // Handle server-level errors
-        QObject::connect(&server, &QLocalServer::serverError, [&]() {
-            LOG_ERROR("Server failed to accept a new connection");
-            LOG_DEBUG("Server error: " << server.errorString());
         });
     });
 
